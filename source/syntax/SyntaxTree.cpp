@@ -213,8 +213,10 @@ void SyntaxTree::parseDisabledBranchTrees(const Bag& options) {
             return;
 
         // The disabled tokens are real lexed tokens with genuine source offsets,
-        // so we can recover the exact branch text by slicing the source buffer
-        // between the first and last token.
+        // so we recover the branch text by slicing the source buffer from the
+        // first disabled token to the end of the last. The slice intentionally
+        // starts at the first token (not its leading trivia) so the recovered
+        // tree's offsets line up with disabledTokens[0]'s location.
         Token firstTok = (*disabled)[0];
         Token lastTok = (*disabled)[disabled->size() - 1];
         SourceLocation startLoc = firstTok.location();

@@ -516,10 +516,20 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def("getIncludeDirectives", &SyntaxTree::getIncludeDirectives)
         .def(
             "getParsedDisabledBranches",
-            [](const SyntaxTree& self) {
-                auto branches = self.getParsedDisabledBranches();
-                return std::vector<SyntaxTree::ParsedDisabledBranch>(branches.begin(),
-                                                                     branches.end());
+            [](py::object self) {
+                auto& tree = self.cast<SyntaxTree&>();
+                py::list out;
+                for (const auto& branch : tree.getParsedDisabledBranches()) {
+                    py::object elem = py::cast(branch);
+                    // branch.directive is a raw pointer into the parent tree, so
+                    // keep the parent alive as long as any returned branch object
+                    // lives. Tying the parent to each element works where a single
+                    // keep_alive on the returned list does not (lists aren't
+                    // weak-referenceable).
+                    py::detail::keep_alive_impl(elem, self);
+                    out.append(std::move(elem));
+                }
+                return out;
             },
             "The not-taken `ifdef/`else branches parsed into standalone syntax trees. "
             "Only populated when ParserOptions.parseDisabledBranches was set.")
