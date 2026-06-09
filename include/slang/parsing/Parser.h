@@ -135,6 +135,16 @@ struct SLANG_EXPORT ParserOptions {
 
     /// The version of the SystemVerilog language to use.
     LanguageVersion languageVersion = LanguageVersion::Default;
+
+    /// If true, the not-taken branches of conditional compilation directives
+    /// (`ifdef / `ifndef / `elsif / `else) are parsed, best-effort, into
+    /// standalone syntax trees instead of being left as opaque disabled tokens.
+    /// The resulting trees are exposed via SyntaxTree::getParsedDisabledBranches()
+    /// and are kept entirely separate from the main tree -- they never
+    /// participate in elaboration. This is intended for refactoring tools that
+    /// need to inspect or rewrite code inside conditional branches that the
+    /// active configuration did not select.
+    bool parseDisabledBranches = false;
 };
 
 /// Implements a full syntax parser for SystemVerilog.

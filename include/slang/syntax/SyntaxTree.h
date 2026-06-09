@@ -247,6 +247,22 @@ public:
         return preprocessorMetadata.sourceBufferIds;
     }
 
+    /// A not-taken conditional branch that was parsed into a standalone tree.
+    /// @a directive is the conditional-directive node (in the main tree) that
+    /// owned the disabled tokens; @a tree is the syntax tree parsed from those
+    /// tokens. The tree is independent of the main tree and is never elaborated.
+    struct ParsedDisabledBranch {
+        const SyntaxNode* directive;
+        std::shared_ptr<SyntaxTree> tree;
+    };
+
+    /// Gets the not-taken conditional branches that were parsed into standalone
+    /// syntax trees. Only populated when ParserOptions::parseDisabledBranches
+    /// was set; otherwise empty.
+    std::span<const ParsedDisabledBranch> getParsedDisabledBranches() const {
+        return disabledBranches;
+    }
+
     /// Checks that the syntax tree is valid, in the sense that it round trips
     /// through text and back again to an equivalent tree.
     ///
@@ -271,6 +287,11 @@ private:
                                               const Bag& options, MacroList inheritedMacros,
                                               bool guess);
 
+    // Best-effort parse of every not-taken conditional branch in this tree into
+    // a standalone syntax tree, populating @a disabledBranches. Invoked from
+    // create() when ParserOptions::parseDisabledBranches is set.
+    void parseDisabledBranchTrees(const Bag& options);
+
     SyntaxNode* rootNode;
     const SourceLibrary* library;
     SourceManager& sourceMan;
@@ -279,6 +300,7 @@ private:
     Bag options_;
     parsing::ParserMetadata metadata;
     parsing::PreprocessorMetadata preprocessorMetadata;
+    std::vector<ParsedDisabledBranch> disabledBranches;
 };
 
 } // namespace slang::syntax

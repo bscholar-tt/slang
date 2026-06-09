@@ -10,6 +10,7 @@
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/ParserMetadata.h"
 #include "slang/parsing/Preprocessor.h"
+#include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxPrinter.h"
 #include "slang/text/SourceManager.h"
 #include "slang/util/TimeTrace.h"
@@ -157,6 +158,8 @@ std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
     if (ppOpts && ppOpts->bufferChangeCB)
         ppOpts->bufferChangeCB(sources.front().id, false, false);
 
+    const auto parserOptions = options.getOrDefault<ParserOptions>();
+
     Parser parser(preprocessor, options);
 
     SyntaxNode* root;
@@ -168,9 +171,94 @@ std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
             return create(sourceManager, sources, options, inheritedMacros, false);
     }
 
-    return std::shared_ptr<SyntaxTree>(
+    auto tree = std::shared_ptr<SyntaxTree>(
         new SyntaxTree(root, library, sourceManager, std::move(alloc), std::move(diagnostics),
                        parser.getMetadata(), preprocessor.getMetadata(), options));
+
+    // Opt-in: parse the not-taken conditional branches into standalone trees.
+    // Skipped for `guess` sub-parses (snippets) to keep the pass bounded.
+    if (!guess && parserOptions.parseDisabledBranches)
+        tree->parseDisabledBranchTrees(options);
+
+    return tree;
+}
+
+void SyntaxTree::parseDisabledBranchTrees(const Bag& options) {
+    // Parse each disabled branch as an isolated snippet. Clear the flag for the
+    // sub-parse so a nested conditional inside a disabled branch doesn't trigger
+    // unbounded recursion; one level of recovery is enough for tooling and keeps
+    // behavior predictable.
+    Bag subOptions = options;
+    auto subParserOpts = options.getOrDefault<ParserOptions>();
+    subParserOpts.parseDisabledBranches = false;
+    subOptions.set(subParserOpts);
+
+    auto handleDirective = [&](const SyntaxNode* dir) {
+        const TokenList* disabled = nullptr;
+        switch (dir->kind) {
+            case SyntaxKind::IfDefDirective:
+            case SyntaxKind::IfNDefDirective:
+            case SyntaxKind::ElsIfDirective:
+                disabled = &dir->as<ConditionalBranchDirectiveSyntax>().disabledTokens;
+                break;
+            case SyntaxKind::ElseDirective:
+            case SyntaxKind::EndIfDirective:
+                disabled = &dir->as<UnconditionalBranchDirectiveSyntax>().disabledTokens;
+                break;
+            default:
+                return;
+        }
+
+        if (!disabled || disabled->empty())
+            return;
+
+        // The disabled tokens are real lexed tokens with genuine source offsets,
+        // so we can recover the exact branch text by slicing the source buffer
+        // between the first and last token.
+        Token firstTok = (*disabled)[0];
+        Token lastTok = (*disabled)[disabled->size() - 1];
+        SourceLocation startLoc = firstTok.location();
+        SourceLocation endLoc = lastTok.range().end();
+        if (!startLoc.valid() || !endLoc.valid() || startLoc.buffer() != endLoc.buffer())
+            return;
+
+        std::string_view fullText = sourceMan.getSourceText(startLoc.buffer());
+        size_t s = startLoc.offset();
+        size_t e = endLoc.offset();
+        if (s > e || e > fullText.size())
+            return;
+
+        std::string_view branchText = fullText.substr(s, e - s);
+        auto subTree = SyntaxTree::fromText(branchText, sourceMan, "disabled-branch", "",
+                                            subOptions, library);
+        if (subTree)
+            disabledBranches.push_back({dir, std::move(subTree)});
+    };
+
+    // Conditional directives live in token trivia, not as ordinary children, so
+    // walk every token in the tree and inspect its trivia.
+    std::vector<const SyntaxNode*> stack{rootNode};
+    while (!stack.empty()) {
+        const SyntaxNode* node = stack.back();
+        stack.pop_back();
+        if (!node)
+            continue;
+
+        size_t count = node->getChildCount();
+        for (size_t i = 0; i < count; i++) {
+            if (const SyntaxNode* childNode = node->childNode(i)) {
+                stack.push_back(childNode);
+            }
+            else if (Token token = node->childToken(i)) {
+                for (const auto& tr : token.trivia()) {
+                    if (tr.kind == parsing::TriviaKind::Directive) {
+                        if (const SyntaxNode* dir = tr.syntax())
+                            handleDirective(dir);
+                    }
+                }
+            }
+        }
+    }
 }
 
 std::shared_ptr<SyntaxTree> SyntaxTree::fromLibraryMapFile(std::string_view path,

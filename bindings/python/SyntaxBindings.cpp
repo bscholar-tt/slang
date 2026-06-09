@@ -413,6 +413,13 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def_readonly("buffer", &IncludeMetadata::buffer)
         .def_readonly("isSystem", &IncludeMetadata::isSystem);
 
+    py::classh<SyntaxTree::ParsedDisabledBranch>(m, "ParsedDisabledBranch")
+        .def_readonly("directive", &SyntaxTree::ParsedDisabledBranch::directive,
+                      "The conditional-directive node (in the main tree) that owned "
+                      "the not-taken tokens.")
+        .def_readonly("tree", &SyntaxTree::ParsedDisabledBranch::tree,
+                      "The syntax tree parsed from the not-taken branch's tokens.");
+
     py::classh<SyntaxTree>(m, "SyntaxTree")
         .def_readonly("isLibraryUnit", &SyntaxTree::isLibraryUnit)
         .def_static(
@@ -484,6 +491,15 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def_property_readonly("options", &SyntaxTree::options)
         .def_property_readonly("sourceLibrary", &SyntaxTree::getSourceLibrary)
         .def("getIncludeDirectives", &SyntaxTree::getIncludeDirectives)
+        .def(
+            "getParsedDisabledBranches",
+            [](const SyntaxTree& self) {
+                auto branches = self.getParsedDisabledBranches();
+                return std::vector<SyntaxTree::ParsedDisabledBranch>(branches.begin(),
+                                                                     branches.end());
+            },
+            "The not-taken `ifdef/`else branches parsed into standalone syntax trees. "
+            "Only populated when ParserOptions.parseDisabledBranches was set.")
         .def_static("getDefaultSourceManager", &SyntaxTree::getDefaultSourceManager, byref)
         .def("validate", &SyntaxTree::validate)
         .def(
@@ -544,7 +560,8 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
     py::classh<ParserOptions>(parsing, "ParserOptions")
         .def(py::init<>())
         .def_readwrite("maxRecursionDepth", &ParserOptions::maxRecursionDepth)
-        .def_readwrite("languageVersion", &ParserOptions::languageVersion);
+        .def_readwrite("languageVersion", &ParserOptions::languageVersion)
+        .def_readwrite("parseDisabledBranches", &ParserOptions::parseDisabledBranches);
 
     py::classh<SyntaxPrinter>(m, "SyntaxPrinter")
         .def(py::init<>())
