@@ -458,3 +458,45 @@ def test_rewriter_handler_errors_are_propagated():
         )
         is True
     )
+
+
+def test_replace_token_renames_declaration_name_tokens():
+    """Declaration-name tokens (module header name, end-block label) are bare
+    tokens, not nodes, so replace() can't touch them -- replaceToken/By Text can."""
+    from pyslang.syntax import SyntaxPrinter
+
+    tree = SyntaxTree.fromText(
+        "module old_mod (input clk);\n  sub_t u_inst();\nendmodule : old_mod\n",
+        "test.sv",
+    )
+
+    def handler(node: SyntaxNode, rw: SyntaxRewriter) -> None:
+        if node.kind in (SyntaxKind.ModuleHeader, SyntaxKind.NamedBlockClause):
+            rw.replaceTokenByText(node, "old_mod", rw.makeId("new_mod"), True)
+
+    out = rewrite(tree, handler)
+    text = SyntaxPrinter.printFile(out)
+
+    assert "module new_mod" in text
+    assert "endmodule : new_mod" in text
+    assert "old_mod" not in text
+    # Untouched content is preserved verbatim.
+    assert "sub_t u_inst();" in text
+
+
+def test_replace_token_by_index_matches_child_token():
+    tree = SyntaxTree.fromText("module old_mod; endmodule\n", "test.sv")
+
+    def handler(node: SyntaxNode, rw: SyntaxRewriter) -> None:
+        if node.kind == SyntaxKind.ModuleHeader:
+            # Locate the name token's child index, then replace by index.
+            for i in range(len(node)):
+                child = node[i]
+                if isinstance(child, Token) and child.valueText == "old_mod":
+                    rw.replaceToken(node, i, rw.makeId("new_mod"), True)
+                    break
+
+    from pyslang.syntax import SyntaxPrinter
+
+    out = rewrite(tree, handler)
+    assert "module new_mod;" in SyntaxPrinter.printFile(out)

@@ -265,6 +265,85 @@ TEST_CASE("Skipped conditional branches keep nested disabled tokens") {
           std::vector<SyntaxKind>{SyntaxKind::IfDefDirective, SyntaxKind::EndIfDirective});
 }
 
+// The disabled-branch pass runs for full-unit parses, so use fromFileInMemory
+// (guess=false) rather than the snippet fromText path (which parses in guess
+// mode and skips the pass).
+static std::shared_ptr<SyntaxTree> parseUnit(std::string_view text, bool parseDisabled) {
+    ParserOptions popts;
+    popts.parseDisabledBranches = parseDisabled;
+    Bag options;
+    options.set(popts);
+    return SyntaxTree::fromFileInMemory(text, SyntaxTree::getDefaultSourceManager(), "test", "",
+                                       options);
+}
+
+TEST_CASE("parseDisabledBranches off by default leaves branches unparsed") {
+    auto tree = parseUnit(R"(
+`ifdef USE_A
+module the_mod (input a); endmodule
+`else
+module the_mod (input b); endmodule
+`endif
+)",
+                          false);
+    CHECK(tree->getParsedDisabledBranches().empty());
+}
+
+TEST_CASE("parseDisabledBranches parses the not-taken ifdef arm into a tree") {
+    auto tree = parseUnit(R"(
+`ifdef USE_A
+module the_mod (input a); the_pkg::t x; endmodule
+`else
+module the_mod (input b); endmodule
+`endif
+)",
+                          true);
+
+    auto branches = tree->getParsedDisabledBranches();
+    REQUIRE(branches.size() == 1);
+    CHECK(branches[0].directive->kind == SyntaxKind::IfDefDirective);
+    REQUIRE(branches[0].tree->root().kind == SyntaxKind::ModuleDeclaration);
+    auto& mod = branches[0].tree->root().as<ModuleDeclarationSyntax>();
+    CHECK(mod.header->name.valueText() == "the_mod");
+}
+
+TEST_CASE("parseDisabledBranches parses the not-taken else arm when macro defined") {
+    auto tree = parseUnit(R"(
+`define USE_A
+`ifdef USE_A
+module a_mod; endmodule
+`else
+module b_mod; endmodule
+`endif
+)",
+                          true);
+
+    auto branches = tree->getParsedDisabledBranches();
+    REQUIRE(branches.size() == 1);
+    CHECK(branches[0].directive->kind == SyntaxKind::ElseDirective);
+    REQUIRE(branches[0].tree->root().kind == SyntaxKind::ModuleDeclaration);
+    CHECK(branches[0].tree->root().as<ModuleDeclarationSyntax>().header->name.valueText() ==
+          "b_mod");
+}
+
+TEST_CASE("parseDisabledBranches degrades gracefully on an unparseable fragment") {
+    auto tree = parseUnit(R"(
+`ifdef NOPE
+   endmodule ) ; +
+`endif
+module live_mod; endmodule
+)",
+                          true);
+
+    // The live tree is intact regardless of what happened in the dead fragment,
+    // and the pass ran without throwing.
+    REQUIRE(tree->root().kind == SyntaxKind::CompilationUnit);
+    auto& cu = tree->root().as<CompilationUnitSyntax>();
+    REQUIRE(cu.members.size() == 1);
+    CHECK(cu.members[0]->as<ModuleDeclarationSyntax>().header->name.valueText() == "live_mod");
+    (void)tree->getParsedDisabledBranches();
+}
+
 TEST_CASE("Macro usage metadata") {
     auto tree = SyntaxTree::fromText(R"(
 `define FOO 1
