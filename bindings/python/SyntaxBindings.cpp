@@ -110,6 +110,29 @@ public:
         this->replace(oldNode, cloneNode(newNode), preserveTrivia);
     }
 
+    // Replace the token at child-index `index` within `node`. This is the
+    // primitive needed to rename bare-token targets (declaration names,
+    // instantiation type tokens, etc.) that aren't wrapped in their own node.
+    void py_replaceToken(const SyntaxNode& node, size_t index, Token newToken,
+                         bool preserveTrivia = false) {
+        this->replaceToken(node, index, newToken, preserveTrivia);
+    }
+
+    // Ergonomic helper: replace the first child token of `node` whose text
+    // equals `oldText`. Returns True if a token was matched/replaced. Saves the
+    // caller from manually scanning child indices for the common rename case.
+    bool py_replaceTokenByText(const SyntaxNode& node, std::string_view oldText, Token newToken,
+                               bool preserveTrivia = false) {
+        for (size_t i = 0, n = node.getChildCount(); i < n; i++) {
+            auto tok = node.childToken(i);
+            if (tok && tok.valueText() == oldText) {
+                this->replaceToken(node, i, newToken, preserveTrivia);
+                return true;
+            }
+        }
+        return false;
+    }
+
     void py_insertBefore(const SyntaxNode& node, SyntaxNode& newNode) {
         this->insertBefore(node, cloneNode(newNode));
     }
@@ -413,6 +436,14 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def_readonly("buffer", &IncludeMetadata::buffer)
         .def_readonly("isSystem", &IncludeMetadata::isSystem);
 
+    py::classh<SyntaxTree::ParsedDisabledBranch>(m, "ParsedDisabledBranch",
+                                                  py::dynamic_attr())
+        .def_readonly("directive", &SyntaxTree::ParsedDisabledBranch::directive,
+                      "The conditional-directive node (in the main tree) that owned "
+                      "the not-taken tokens.")
+        .def_readonly("tree", &SyntaxTree::ParsedDisabledBranch::tree,
+                      "The syntax tree parsed from the not-taken branch's tokens.");
+
     py::classh<SyntaxTree>(m, "SyntaxTree")
         .def_readonly("isLibraryUnit", &SyntaxTree::isLibraryUnit)
         .def_static(
@@ -484,6 +515,24 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def_property_readonly("options", &SyntaxTree::options)
         .def_property_readonly("sourceLibrary", &SyntaxTree::getSourceLibrary)
         .def("getIncludeDirectives", &SyntaxTree::getIncludeDirectives)
+        .def(
+            "getParsedDisabledBranches",
+            [](py::object self) {
+                auto& tree = self.cast<SyntaxTree&>();
+                py::list out;
+                for (const auto& branch : tree.getParsedDisabledBranches()) {
+                    py::object elem = py::cast(branch);
+                    // Store the parent as a Python-level attribute so Python's own
+                    // ref counting keeps the parent tree alive as long as any branch
+                    // object lives. C++ shared_ptr fields inside classh objects are
+                    // invisible to the Python GC and can't serve this role.
+                    elem.attr("_parent") = self;
+                    out.append(std::move(elem));
+                }
+                return out;
+            },
+            "The not-taken `ifdef/`else branches parsed into standalone syntax trees. "
+            "Only populated when ParserOptions.parseDisabledBranches was set.")
         .def_static("getDefaultSourceManager", &SyntaxTree::getDefaultSourceManager, byref)
         .def("validate", &SyntaxTree::validate)
         .def(
@@ -544,7 +593,8 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
     py::classh<ParserOptions>(parsing, "ParserOptions")
         .def(py::init<>())
         .def_readwrite("maxRecursionDepth", &ParserOptions::maxRecursionDepth)
-        .def_readwrite("languageVersion", &ParserOptions::languageVersion);
+        .def_readwrite("languageVersion", &ParserOptions::languageVersion)
+        .def_readwrite("parseDisabledBranches", &ParserOptions::parseDisabledBranches);
 
     py::classh<SyntaxPrinter>(m, "SyntaxPrinter")
         .def(py::init<>())
@@ -569,6 +619,13 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
 
     py::classh<PySyntaxRewriter>(m, "SyntaxRewriter")
         .def("remove", &PySyntaxRewriter::py_remove)
+        .def("replaceToken", &PySyntaxRewriter::py_replaceToken, "node"_a, "index"_a,
+             "newToken"_a, "preserveTrivia"_a = false,
+             "Replace the token at child index `index` within `node`.")
+        .def("replaceTokenByText", &PySyntaxRewriter::py_replaceTokenByText, "node"_a,
+             "oldText"_a, "newToken"_a, "preserveTrivia"_a = false,
+             "Replace the first child token of `node` whose text == `oldText`; "
+             "returns True if one was replaced.")
         .def("replace", &PySyntaxRewriter::py_replace, "oldNode"_a, "newNode"_a,
              "preserveTrivia"_a = false)
         .def("insertBefore", &PySyntaxRewriter::py_insertBefore)
