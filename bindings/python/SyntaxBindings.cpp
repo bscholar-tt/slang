@@ -436,14 +436,13 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def_readonly("buffer", &IncludeMetadata::buffer)
         .def_readonly("isSystem", &IncludeMetadata::isSystem);
 
-    py::classh<SyntaxTree::ParsedDisabledBranch>(m, "ParsedDisabledBranch")
+    py::classh<SyntaxTree::ParsedDisabledBranch>(m, "ParsedDisabledBranch",
+                                                  py::dynamic_attr())
         .def_readonly("directive", &SyntaxTree::ParsedDisabledBranch::directive,
                       "The conditional-directive node (in the main tree) that owned "
                       "the not-taken tokens.")
         .def_readonly("tree", &SyntaxTree::ParsedDisabledBranch::tree,
-                      "The syntax tree parsed from the not-taken branch's tokens.")
-        .def_readonly("parentTree", &SyntaxTree::ParsedDisabledBranch::parentTree,
-                      "The main syntax tree that owns the directive node.");
+                      "The syntax tree parsed from the not-taken branch's tokens.");
 
     py::classh<SyntaxTree>(m, "SyntaxTree")
         .def_readonly("isLibraryUnit", &SyntaxTree::isLibraryUnit)
@@ -518,9 +517,19 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def("getIncludeDirectives", &SyntaxTree::getIncludeDirectives)
         .def(
             "getParsedDisabledBranches",
-            [](const SyntaxTree& self) -> std::vector<SyntaxTree::ParsedDisabledBranch> {
-                auto span = self.getParsedDisabledBranches();
-                return {span.begin(), span.end()};
+            [](py::object self) {
+                auto& tree = self.cast<SyntaxTree&>();
+                py::list out;
+                for (const auto& branch : tree.getParsedDisabledBranches()) {
+                    py::object elem = py::cast(branch);
+                    // Store the parent as a Python-level attribute so Python's own
+                    // ref counting keeps the parent tree alive as long as any branch
+                    // object lives. C++ shared_ptr fields inside classh objects are
+                    // invisible to the Python GC and can't serve this role.
+                    elem.attr("_parent") = self;
+                    out.append(std::move(elem));
+                }
+                return out;
             },
             "The not-taken `ifdef/`else branches parsed into standalone syntax trees. "
             "Only populated when ParserOptions.parseDisabledBranches was set.")
