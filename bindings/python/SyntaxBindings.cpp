@@ -441,7 +441,9 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
                       "The conditional-directive node (in the main tree) that owned "
                       "the not-taken tokens.")
         .def_readonly("tree", &SyntaxTree::ParsedDisabledBranch::tree,
-                      "The syntax tree parsed from the not-taken branch's tokens.");
+                      "The syntax tree parsed from the not-taken branch's tokens.")
+        .def_readonly("parentTree", &SyntaxTree::ParsedDisabledBranch::parentTree,
+                      "The main syntax tree that owns the directive node.");
 
     py::classh<SyntaxTree>(m, "SyntaxTree")
         .def_readonly("isLibraryUnit", &SyntaxTree::isLibraryUnit)
@@ -516,20 +518,8 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def("getIncludeDirectives", &SyntaxTree::getIncludeDirectives)
         .def(
             "getParsedDisabledBranches",
-            [](py::object self) {
-                auto& tree = self.cast<SyntaxTree&>();
-                py::list out;
-                for (const auto& branch : tree.getParsedDisabledBranches()) {
-                    py::object elem = py::cast(branch);
-                    // branch.directive is a raw pointer into the parent tree, so
-                    // keep the parent alive as long as any returned branch object
-                    // lives. Tying the parent to each element works where a single
-                    // keep_alive on the returned list does not (lists aren't
-                    // weak-referenceable).
-                    py::detail::keep_alive_impl(elem, self);
-                    out.append(std::move(elem));
-                }
-                return out;
+            [](const SyntaxTree& self) {
+                return py::cast(self.getParsedDisabledBranches());
             },
             "The not-taken `ifdef/`else branches parsed into standalone syntax trees. "
             "Only populated when ParserOptions.parseDisabledBranches was set.")

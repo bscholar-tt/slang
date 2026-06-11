@@ -178,12 +178,12 @@ std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
     // Opt-in: parse the not-taken conditional branches into standalone trees.
     // Skipped for `guess` sub-parses (snippets) to keep the pass bounded.
     if (!guess && parserOptions.parseDisabledBranches)
-        tree->parseDisabledBranchTrees(options);
+        tree->parseDisabledBranchTrees(options, tree);
 
     return tree;
 }
 
-void SyntaxTree::parseDisabledBranchTrees(const Bag& options) {
+void SyntaxTree::parseDisabledBranchTrees(const Bag& options, std::shared_ptr<SyntaxTree> self) {
     // Parse each disabled branch as an isolated snippet. Clear the flag for the
     // sub-parse so a nested conditional inside a disabled branch doesn't trigger
     // unbounded recursion; one level of recovery is enough for tooling and keeps
@@ -234,7 +234,7 @@ void SyntaxTree::parseDisabledBranchTrees(const Bag& options) {
         auto subTree = SyntaxTree::fromText(branchText, sourceMan, "disabled-branch", "",
                                             subOptions, library);
         if (subTree)
-            disabledBranches.push_back({dir, std::move(subTree)});
+            disabledBranches.push_back({dir, std::move(subTree), self});
     };
 
     // Conditional directives live in token trivia, not as ordinary children, so

@@ -254,6 +254,7 @@ public:
     struct ParsedDisabledBranch {
         const SyntaxNode* directive;
         std::shared_ptr<SyntaxTree> tree;
+        std::shared_ptr<SyntaxTree> parentTree;
     };
 
     /// Gets the not-taken conditional branches that were parsed into standalone
@@ -290,7 +291,7 @@ private:
     // Best-effort parse of every not-taken conditional branch in this tree into
     // a standalone syntax tree, populating @a disabledBranches. Invoked from
     // create() when ParserOptions::parseDisabledBranches is set.
-    void parseDisabledBranchTrees(const Bag& options);
+    void parseDisabledBranchTrees(const Bag& options, std::shared_ptr<SyntaxTree> self);
 
     SyntaxNode* rootNode;
     const SourceLibrary* library;
