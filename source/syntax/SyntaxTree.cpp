@@ -184,15 +184,6 @@ std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
 }
 
 void SyntaxTree::parseDisabledBranchTrees(const Bag& options) {
-    // Parse each disabled branch as an isolated snippet. Clear the flag for the
-    // sub-parse so a nested conditional inside a disabled branch doesn't trigger
-    // unbounded recursion; one level of recovery is enough for tooling and keeps
-    // behavior predictable.
-    Bag subOptions = options;
-    auto subParserOpts = options.getOrDefault<ParserOptions>();
-    subParserOpts.parseDisabledBranches = false;
-    subOptions.set(subParserOpts);
-
     auto handleDirective = [&](const SyntaxNode* dir) {
         const TokenList* disabled = nullptr;
         switch (dir->kind) {
@@ -232,7 +223,7 @@ void SyntaxTree::parseDisabledBranchTrees(const Bag& options) {
 
         std::string_view branchText = fullText.substr(s, e - s);
         auto subTree = SyntaxTree::fromText(branchText, sourceMan, "disabled-branch", "",
-                                            subOptions, library);
+                                            options, library);
         if (subTree)
             disabledBranches.push_back({dir, std::move(subTree)});
     };
