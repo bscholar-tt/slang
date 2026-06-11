@@ -518,8 +518,9 @@ void registerSyntax(py::module_& syntax, py::module_& parsing) {
         .def("getIncludeDirectives", &SyntaxTree::getIncludeDirectives)
         .def(
             "getParsedDisabledBranches",
-            [](const SyntaxTree& self) {
-                return py::cast(self.getParsedDisabledBranches());
+            [](const SyntaxTree& self) -> std::vector<SyntaxTree::ParsedDisabledBranch> {
+                auto span = self.getParsedDisabledBranches();
+                return {span.begin(), span.end()};
             },
             "The not-taken `ifdef/`else branches parsed into standalone syntax trees. "
             "Only populated when ParserOptions.parseDisabledBranches was set.")
